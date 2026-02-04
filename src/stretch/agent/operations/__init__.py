@@ -34,3 +34,7 @@ from .speak import SpeakOperation
 from .switch_mode import GoToNavOperation
 from .update import UpdateOperation
 from .utility_operations import SetCurrentObjectOperation, SetCurrentReceptacleOperation
+from .tag_detection import DetectAprilTagsOperation, ScanForTagsOperation
+from .navigate_to_tag import NavigateToTagOperation
+from .tag_grasp import TagServoGraspOperation
+from .tag_place import TagServoPlaceOperation
