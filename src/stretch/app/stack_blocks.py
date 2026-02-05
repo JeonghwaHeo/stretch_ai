@@ -12,7 +12,6 @@ from stretch.agent.robot_agent import RobotAgent
 from stretch.agent.task.stack_blocks import StackBlocksTask
 from stretch.agent.zmq_client import HomeRobotZmqClient
 from stretch.core import get_parameters
-from stretch.perception import create_semantic_sensor
 from stretch.utils.logger import Logger
 
 logger = Logger(__name__)
@@ -80,12 +79,7 @@ def main(
         use_remote_computer=(not local),
         parameters=parameters,
     )
-    semantic_sensor = create_semantic_sensor(
-        parameters=parameters,
-        device_id=device_id,
-        verbose=False,
-    )
-
+    semantic_sensor = None
     agent = RobotAgent(robot, parameters, semantic_sensor, enable_realtime_updates=realtime)
     print("Starting robot agent: initializing...")
     agent.start(visualize_map_at_start=False)
