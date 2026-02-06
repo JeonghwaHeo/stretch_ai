@@ -49,11 +49,38 @@ class StackBlocksTask:
         if not go_nav():
             return False
 
-        rotate = RotateInPlaceOperation("rotate_in_place", self.agent)
-        rotate()
+        # Rotate in place and scan for tags at each step.
+        steps = (
+            self.agent.parameters["agent"]["realtime_rotation_steps"]
+            if getattr(self.agent, "_realtime_updates", False)
+            else self.agent.parameters["agent"]["in_place_rotation_steps"]
+        )
+        step_size = 2 * np.pi / steps
+        x, y, theta = self.agent.robot.get_base_pose()
+        full_sweep = True
+        if full_sweep:
+            steps += 1
 
-        scan = ScanForTagsOperation("scan_for_tags", self.agent)
-        return scan(tag_family=self.tag_family, tag_size_m=self.tag_size_m, use_update=self.use_update_scan)
+        any_tags = False
+        for i in range(steps):
+            self.agent.robot.move_base_to(
+                [x, y, theta + (i * step_size)],
+                relative=False,
+                blocking=True,
+                verbose=False,
+            )
+            if self.agent.robot.last_motion_failed():
+                raise RuntimeError("Robot is stuck!")
+
+            if not getattr(self.agent, "_realtime_updates", False):
+                self.agent.update()
+
+            scan = ScanForTagsOperation("scan_for_tags", self.agent)
+            scan(tag_family=self.tag_family, tag_size_m=self.tag_size_m, use_update=self.use_update_scan)
+            if hasattr(self.agent, "tag_map") and len(self.agent.tag_map) > 0:
+                any_tags = True
+
+        return any_tags
 
     def _get_pose_world(self, tag_id: int):
         if not hasattr(self.agent, "tag_map"):
@@ -85,6 +112,15 @@ class StackBlocksTask:
             self.agent.robot_say("I could not find any tags.")
             return False
 
+        if hasattr(self.agent, "tag_map") and len(self.agent.tag_map) > 0:
+            print("Detected tags (id -> world xyz):")
+            for tid, obs in sorted(self.agent.tag_map.items(), key=lambda kv: kv[0]):
+                if obs.pose_world is None:
+                    print(f"- {tid}: pose_world=None")
+                else:
+                    xyz = obs.pose_world[:3, 3]
+                    print(f"- {tid}: [{xyz[0]:.3f}, {xyz[1]:.3f}, {xyz[2]:.3f}]")
+
         if self._get_pose_world(self.base_tag_id) is None:
             self.agent.robot_say("I could not find the base tag.")
             return False
@@ -104,15 +140,29 @@ class StackBlocksTask:
                 continue
 
             nav_to_block = NavigateToTagOperation("navigate_to_block", self.agent)
-            if not nav_to_block(tag_id=tag_id):
+            if not nav_to_block(
+                tag_id=tag_id,
+                rotation_offset=np.pi / 2,
+                radius_m=self.agent.manipulation_radius,
+                face_target=False,
+            ):
                 return False
 
             grasp = TagServoGraspOperation("tag_grasp", self.agent)
-            if not grasp(tag_id=tag_id, tag_family=self.tag_family, tag_size_m=self.tag_size_m):
+            if not grasp(
+                tag_id=tag_id,
+                tag_family=self.tag_family,
+                tag_size_m=self.tag_size_m,
+            ):
                 return False
 
             nav_to_stack = NavigateToTagOperation("navigate_to_stack", self.agent)
-            if not nav_to_stack(tag_id=self.agent.stack_top_tag_id):
+            if not nav_to_stack(
+                tag_id=self.agent.stack_top_tag_id,
+                rotation_offset=np.pi / 2,
+                radius_m=self.agent.manipulation_radius,
+                face_target=False,
+            ):
                 return False
 
             place = TagServoPlaceOperation("tag_place", self.agent)
