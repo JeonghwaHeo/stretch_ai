@@ -30,16 +30,18 @@ class TagServoGraspOperation(ManagedOperation):
         grasp_height_offset: float = 0.01,
         lift_distance: float = 0.25,
         approach_offset: float = 0.08,
-        pre_detect_offset_z: float = 0.20,
-        pre_detect_offset_toward_robot: float = 0.55,
+        pre_detect_offset_z: float = 0.25,
+        pre_detect_offset_toward_robot: float = 0.60,
         pre_detect_pitch_deg: float = 45.0,
         use_tag_servo: bool = True,
-        tag_target_cam_xyz: tuple = (0.0, 0.0, 0.20),
+        tag_target_cam_xyz: tuple = (0.0, 0.02, 0.20),
         tag_tol_cam_xyz: tuple = (0.005, 0.005, 0.005),
         tag_servo_max_steps: int = 80,
         tag_servo_max_misses: int = 10,
         tag_servo_gain_xyz: tuple = (0.5, 0.5, 0.5),
         tag_servo_step_limits: tuple = (0.03, 0.03, 0.02),
+        gripper_open_value: float = 0.8,
+        gripper_close_value: float = 0.0,
     ):
         self.tag_id = tag_id
         self.tag_family = tag_family
@@ -57,6 +59,8 @@ class TagServoGraspOperation(ManagedOperation):
         self.tag_servo_max_misses = tag_servo_max_misses
         self.tag_servo_gain_xyz = np.array(tag_servo_gain_xyz, dtype=np.float32)
         self.tag_servo_step_limits = np.array(tag_servo_step_limits, dtype=np.float32)
+        self.gripper_open_value = float(gripper_open_value)
+        self.gripper_close_value = float(gripper_close_value)
 
     def can_start(self) -> bool:
         return True
@@ -118,7 +122,9 @@ class TagServoGraspOperation(ManagedOperation):
         self.robot.switch_to_manipulation_mode()
 
         # Open gripper
-        self.robot.open_gripper(blocking=True)
+        # HomeRobotZmqClient.open_gripper() uses a preset and does not accept a target value.
+        # For a custom "open" value, use gripper_to().
+        self.robot.gripper_to(self.gripper_open_value, blocking=True)
 
         if tag_pose_world is not None:
             # Compute a pre-detection pose: 10cm above tag and 10cm toward the robot.
@@ -226,45 +232,49 @@ class TagServoGraspOperation(ManagedOperation):
             self.error("Failed to detect target tag with end-effector camera.")
             return
 
-        # Compute target grasp pose above the tag center
-        target_xyz_world = tag_pose_world[:3, 3].copy()
-        # Tag is on top of the block; grasp should be half block height below the tag.
-        target_xyz_world[2] += self.grasp_height_offset
-
-        xyt = self.robot.get_base_pose()
-        relative_xyz = point_global_to_base(target_xyz_world, xyt)
-
-        joint_state = self.robot.get_joint_positions()
-        ee_pos, ee_rot = self.robot_model.manip_fk(joint_state)
-
-        # Approach offset along current end-effector z axis
-        ee_rot_m = R.from_quat(ee_rot).as_matrix()
-        approach_dir = ee_rot_m[:, 2]
-        approach_xyz = relative_xyz - self.approach_offset * approach_dir
-
-        target_joints, _, _, success, _ = self.robot_model.manip_ik_for_grasp_frame(
-            approach_xyz, ee_rot, q0=joint_state
-        )
-        if not success:
-            self.error("IK failed for approach pose.")
-            return
-
-        # Move to approach
-        self.robot.arm_to(target_joints, head=constants.look_at_ee, blocking=True)
-
-        # Move to final grasp position
-        target_joints_final, _, _, success, _ = self.robot_model.manip_ik_for_grasp_frame(
-            relative_xyz, ee_rot, q0=target_joints
-        )
-        if not success:
-            self.error("IK failed for grasp pose.")
-            return
-
-        self.robot.arm_to(target_joints_final, head=constants.look_at_ee, blocking=True)
-        self.robot.close_gripper(blocking=True)
+        # NOTE: Disabling the additional approach/final IK correction logic.
+        # We rely on the tag servo loop to bring the gripper into a good grasp pose.
+        #
+        # # Compute target grasp pose above the tag center
+        # target_xyz_world = tag_pose_world[:3, 3].copy()
+        # # Tag is on top of the block; grasp should be half block height below the tag.
+        # target_xyz_world[2] += self.grasp_height_offset
+        #
+        # xyt = self.robot.get_base_pose()
+        # relative_xyz = point_global_to_base(target_xyz_world, xyt)
+        #
+        # joint_state = self.robot.get_joint_positions()
+        # ee_pos, ee_rot = self.robot_model.manip_fk(joint_state)
+        #
+        # # Approach offset along current end-effector z axis
+        # ee_rot_m = R.from_quat(ee_rot).as_matrix()
+        # approach_dir = ee_rot_m[:, 2]
+        # approach_xyz = relative_xyz - self.approach_offset * approach_dir
+        #
+        # target_joints, _, _, success, _ = self.robot_model.manip_ik_for_grasp_frame(
+        #     approach_xyz, ee_rot, q0=joint_state
+        # )
+        # if not success:
+        #     self.error("IK failed for approach pose.")
+        #     return
+        #
+        # # Move to approach
+        # self.robot.arm_to(target_joints, head=constants.look_at_ee, blocking=True)
+        #
+        # # Move to final grasp position
+        # target_joints_final, _, _, success, _ = self.robot_model.manip_ik_for_grasp_frame(
+        #     relative_xyz, ee_rot, q0=target_joints
+        # )
+        # if not success:
+        #     self.error("IK failed for grasp pose.")
+        #     return
+        #
+        # self.robot.arm_to(target_joints_final, head=constants.look_at_ee, blocking=True)
+        self.robot.gripper_to(self.gripper_close_value, blocking=True)
 
         # Lift
-        lifted = target_joints_final.copy()
+        joint_state = self.robot.get_joint_positions()
+        lifted = joint_state.copy()
         lifted[HelloStretchIdx.LIFT] += self.lift_distance
         self.robot.arm_to(lifted, head=constants.look_at_ee, blocking=True)
 
