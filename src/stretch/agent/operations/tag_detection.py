@@ -10,6 +10,9 @@
 # license information maybe found below, if so.
 
 from dataclasses import dataclass
+import os
+from pathlib import Path
+import time
 from typing import Dict, List, Optional, Tuple
 
 import cv2
@@ -49,10 +52,38 @@ def _estimate_tag_pose(
     camera_matrix: np.ndarray,
     dist_coeffs: np.ndarray,
 ) -> Tuple[np.ndarray, np.ndarray]:
-    rvecs, tvecs, _ = cv2.aruco.estimatePoseSingleMarkers(
-        corners.reshape(1, 4, 2), tag_size_m, camera_matrix, dist_coeffs
+    if hasattr(cv2.aruco, "estimatePoseSingleMarkers"):
+        rvecs, tvecs, _ = cv2.aruco.estimatePoseSingleMarkers(
+            corners.reshape(1, 4, 2), tag_size_m, camera_matrix, dist_coeffs
+        )
+        return rvecs[0][0], tvecs[0][0]
+
+    # Fallback for OpenCV builds without estimatePoseSingleMarkers.
+    half = tag_size_m / 2.0
+    obj_pts = np.array(
+        [
+            [-half, half, 0.0],
+            [half, half, 0.0],
+            [half, -half, 0.0],
+            [-half, -half, 0.0],
+        ],
+        dtype=np.float32,
     )
-    return rvecs[0][0], tvecs[0][0]
+    img_pts = corners.reshape(4, 2).astype(np.float32)
+    if hasattr(cv2, "SOLVEPNP_IPPE_SQUARE"):
+        flag = cv2.SOLVEPNP_IPPE_SQUARE
+    else:
+        flag = cv2.SOLVEPNP_ITERATIVE
+    ok, rvec, tvec = cv2.solvePnP(
+        obj_pts,
+        img_pts,
+        camera_matrix,
+        dist_coeffs,
+        flags=flag,
+    )
+    if not ok:
+        raise RuntimeError("solvePnP failed to estimate tag pose.")
+    return rvec.reshape(-1), tvec.reshape(-1)
 
 
 def _pose_from_rvec_tvec(rvec: np.ndarray, tvec: np.ndarray) -> np.ndarray:
@@ -143,6 +174,21 @@ class DetectAprilTagsOperation(ManagedOperation):
                     timestamp=float(getattr(obs, "seq_id", -1)),
                 )
             )
+
+        # Print detections for debugging/visibility in apps like stack_blocks.
+        self.info(f"Detected {len(self._observations)} tag(s):")
+        for obs_tag in self._observations:
+            cam_xyz = obs_tag.pose_camera[:3, 3]
+            if obs_tag.pose_world is not None:
+                world_xyz = obs_tag.pose_world[:3, 3]
+                self.info(
+                    f"- id={obs_tag.tag_id} world=[{world_xyz[0]:.3f}, {world_xyz[1]:.3f}, {world_xyz[2]:.3f}] "
+                    f"cam=[{cam_xyz[0]:.3f}, {cam_xyz[1]:.3f}, {cam_xyz[2]:.3f}]"
+                )
+            else:
+                self.info(
+                    f"- id={obs_tag.tag_id} world=None cam=[{cam_xyz[0]:.3f}, {cam_xyz[1]:.3f}, {cam_xyz[2]:.3f}]"
+                )
 
         if self.store_in_agent:
             if not hasattr(self.agent, "tag_map"):
