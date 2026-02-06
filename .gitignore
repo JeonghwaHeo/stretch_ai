@@ -142,3 +142,4 @@ debug*/
 */piper_tts/
 piper_tts/
 *.ts
+logs/
