@@ -58,17 +58,36 @@ class TagServoPlaceOperation(ManagedOperation):
         self.intro(f"Placing on tag {self.stack_top_tag_id}.")
         self._success = False
 
-        tag_pose_world = self._detect_tag_pose()
-        if tag_pose_world is None:
-            self.error("Failed to detect stack top tag with head camera.")
-            return
-
-        # Compute target placement pose above the tag
-        target_xyz_world = tag_pose_world[:3, 3].copy()
-        target_xyz_world[2] += self.block_height_m + self.place_height_margin
-
         self.robot.move_to_manip_posture()
         self.robot.switch_to_manipulation_mode()
+
+        # # Detection of target tag
+        # tag_pose_world = self._detect_tag_pose()
+        # if tag_pose_world is None:
+        #     self.error("Failed to detect stack top tag with head camera.")
+        #     return
+
+        # # Compute target placement pose above the tag
+        # target_xyz_world = tag_pose_world[:3, 3].copy()
+        # target_xyz_world[2] += self.block_height_m + self.place_height_margin
+
+        # Detect multiple times to debug potential noise/issues
+        # Use the annotated code above to only detect once
+        tag_pose_world = None
+        target_xyz_world = None
+        for i in range(10):
+            tag_pose_world = self._detect_tag_pose()
+            if tag_pose_world is None:
+                self.error("Failed to detect stack top tag with head camera.")
+                return
+
+            # Compute target placement pose above the tag
+            target_xyz_world = tag_pose_world[:3, 3].copy()
+            target_xyz_world[2] += self.block_height_m + self.place_height_margin
+            self.info(
+                f"Tag detect {i + 1}/10: target_xyz_world="
+                f"[{target_xyz_world[0]:.3f}, {target_xyz_world[1]:.3f}, {target_xyz_world[2]:.3f}]"
+            )
 
         xyt = self.robot.get_base_pose()
         relative_xyz = point_global_to_base(target_xyz_world, xyt)
