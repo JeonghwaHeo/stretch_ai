@@ -31,7 +31,7 @@ class TagServoGraspOperation(ManagedOperation):
         lift_distance: float = 0.25,
         approach_offset: float = 0.08,
         pre_detect_offset_z: float = 0.25,
-        pre_detect_offset_toward_robot: float = 0.60,
+        pre_detect_offset_toward_robot: float = 0.53,
         pre_detect_pitch_deg: float = 45.0,
         use_tag_servo: bool = True,
         tag_target_cam_xyz: tuple = (0.0, 0.02, 0.20),
@@ -41,7 +41,7 @@ class TagServoGraspOperation(ManagedOperation):
         tag_servo_gain_xyz: tuple = (0.5, 0.5, 0.5),
         tag_servo_step_limits: tuple = (0.03, 0.03, 0.02),
         gripper_open_value: float = 0.8,
-        gripper_close_value: float = 0.0,
+        gripper_close_value: float = 0.1,
     ):
         self.tag_id = tag_id
         self.tag_family = tag_family

@@ -6,8 +6,10 @@
 # This source code is licensed under the license found in the LICENSE file in the root directory
 # of this source tree.
 
-from typing import List, Optional
+from pathlib import Path
+from typing import Dict, List, Optional
 
+import cv2
 import numpy as np
 
 from stretch.agent.operations import (
@@ -19,6 +21,8 @@ from stretch.agent.operations import (
     TagServoPlaceOperation,
 )
 from stretch.agent.robot_agent import RobotAgent
+from stretch.motion import constants
+from stretch.motion.kinematics import HelloStretchIdx
 
 
 class StackBlocksTask:
@@ -50,18 +54,35 @@ class StackBlocksTask:
             return False
 
         # Rotate in place and scan for tags at each step.
-        steps = (
-            self.agent.parameters["agent"]["realtime_rotation_steps"]
-            if getattr(self.agent, "_realtime_updates", False)
-            else self.agent.parameters["agent"]["in_place_rotation_steps"]
-        )
+        steps = 8
         step_size = 2 * np.pi / steps
         x, y, theta = self.agent.robot.get_base_pose()
         full_sweep = True
         if full_sweep:
             steps += 1
 
+        log_dir = Path("./logs/_scan_tags")
+        log_dir.mkdir(parents=True, exist_ok=True)
+        for image_path in log_dir.glob("*.png"):
+            try:
+                image_path.unlink()
+            except OSError as exc:
+                msg = f"Failed to remove old scan image {image_path}: {exc}"
+                if hasattr(self.agent, "warn"):
+                    self.agent.warn(msg)
+                else:
+                    print(f"[WARN] {msg}")
+
         any_tags = False
+        target_tag_ids = None
+        target_tag_obs: Dict[int, Optional[object]] = {}
+        if len(self.stack_tag_ids) > 0:
+            target_tag_ids = {self.base_tag_id, *self.stack_tag_ids}
+            target_tag_obs = {tag_id: None for tag_id in target_tag_ids}
+        # During scanning, tilt the head to -45 deg for better tag visibility.
+        scan_head_pan = 0.0
+        scan_head_tilt = float(np.deg2rad(-45.0))
+        self.agent.robot.head_to(scan_head_pan, scan_head_tilt, blocking=True)
         for i in range(steps):
             self.agent.robot.move_base_to(
                 [x, y, theta + (i * step_size)],
@@ -75,10 +96,80 @@ class StackBlocksTask:
             if not getattr(self.agent, "_realtime_updates", False):
                 self.agent.update()
 
-            scan = ScanForTagsOperation("scan_for_tags", self.agent)
-            scan(tag_family=self.tag_family, tag_size_m=self.tag_size_m, use_update=self.use_update_scan)
-            if hasattr(self.agent, "tag_map") and len(self.agent.tag_map) > 0:
-                any_tags = True
+            obs = self.agent.robot.get_observation()
+            if obs is not None and obs.rgb is not None:
+                try:
+                    save_ok = cv2.imwrite(str(log_dir / f"{i}.png"), obs.rgb)
+                    if not save_ok:
+                        msg = f"Failed to save scan image at step {i}."
+                        if hasattr(self.agent, "warn"):
+                            self.agent.warn(msg)
+                        else:
+                            print(f"[WARN] {msg}")
+                except cv2.error as exc:
+                    msg = f"OpenCV error while saving scan image at step {i}: {exc}"
+                    if hasattr(self.agent, "warn"):
+                        self.agent.warn(msg)
+                    else:
+                        print(f"[WARN] {msg}")
+            else:
+                msg = f"Missing head camera image at step {i}; skipping save."
+                if hasattr(self.agent, "warn"):
+                    self.agent.warn(msg)
+                else:
+                    print(f"[WARN] {msg}")
+
+            max_scan_tries_per_step = 6
+            if not hasattr(self.agent, "tag_map"):
+                self.agent.tag_map = {}
+            if not hasattr(self.agent, "tag_history"):
+                self.agent.tag_history = []
+
+            for scan_try in range(max_scan_tries_per_step):
+                pre_hist_len = len(self.agent.tag_history)
+                scan = ScanForTagsOperation("scan_for_tags", self.agent)
+                scan(
+                    tag_family=self.tag_family,
+                    tag_size_m=self.tag_size_m,
+                    use_update=self.use_update_scan,
+                )
+                try_obs = self.agent.tag_history[pre_hist_len:]
+                try_count = len(try_obs)
+                print(
+                    f"scan step {i}: try {scan_try + 1}/{max_scan_tries_per_step}, detected={try_count}"
+                )
+                if try_count == 0:
+                    continue
+
+                if target_tag_ids is None:
+                    any_tags = True
+                    continue
+
+                for obs_tag in try_obs:
+                    if obs_tag.tag_id in target_tag_obs:
+                        target_tag_obs[obs_tag.tag_id] = obs_tag
+                        any_tags = True
+
+            if target_tag_ids is None:
+                continue
+
+            found_count = sum(obs is not None for obs in target_tag_obs.values())
+            print(
+                f"scan step {i}: target tags found so far {found_count}/{len(target_tag_obs)}"
+            )
+
+        if target_tag_ids is not None:
+            # Commit final target list observations so downstream uses consistent tag poses.
+            if not hasattr(self.agent, "tag_map"):
+                self.agent.tag_map = {}
+            for tag_id, obs_tag in target_tag_obs.items():
+                if obs_tag is not None:
+                    self.agent.tag_map[tag_id] = obs_tag
+
+        # Restore navigation head pose after scanning.
+        nav_pan = float(constants.STRETCH_NAVIGATION_Q[HelloStretchIdx.HEAD_PAN])
+        nav_tilt = float(constants.STRETCH_NAVIGATION_Q[HelloStretchIdx.HEAD_TILT])
+        self.agent.robot.head_to(nav_pan, nav_tilt, blocking=True)
 
         return any_tags
 

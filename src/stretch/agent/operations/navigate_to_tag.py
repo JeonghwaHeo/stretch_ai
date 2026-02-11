@@ -20,7 +20,7 @@ class NavigateToTagOperation(ManagedOperation):
     def configure(
         self,
         tag_id: int,
-        xy_margin: float = 0.35,
+        xy_margin: float = 0.20,
         rotation_offset: float = 0.0,
         radius_m: float = 0.7,
         face_target: bool = True,

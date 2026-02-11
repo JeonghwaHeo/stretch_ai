@@ -94,6 +94,11 @@ def _pose_from_rvec_tvec(rvec: np.ndarray, tvec: np.ndarray) -> np.ndarray:
     return pose
 
 
+def _set_if_hasattr(obj, name: str, value) -> None:
+    if hasattr(obj, name):
+        setattr(obj, name, value)
+
+
 class DetectAprilTagsOperation(ManagedOperation):
     """Detect AprilTags and update agent.tag_map."""
 
@@ -104,12 +109,20 @@ class DetectAprilTagsOperation(ManagedOperation):
         camera: str = "head",
         dist_coeffs: Optional[np.ndarray] = None,
         store_in_agent: bool = True,
+        quad_decimate: float = 0.3,
+        quad_sigma: float = 0.0,
+        min_marker_perimeter_rate: float = 0.003,
+        multi_scale_factors: Tuple[float, ...] = (1.0, 1.5, 2.0, 2.5),
     ):
         self.tag_family = tag_family
         self.tag_size_m = tag_size_m
         self.camera = camera
         self.dist_coeffs = dist_coeffs
         self.store_in_agent = store_in_agent
+        self.quad_decimate = quad_decimate
+        self.quad_sigma = quad_sigma
+        self.min_marker_perimeter_rate = min_marker_perimeter_rate
+        self.multi_scale_factors = multi_scale_factors
 
     def can_start(self) -> bool:
         return True
@@ -145,14 +158,41 @@ class DetectAprilTagsOperation(ManagedOperation):
 
         aruco_dict = _tag_dictionary_for_family(self.tag_family)
         aruco_params = cv2.aruco.DetectorParameters()
+        # AprilTag-specific tuning: lower decimation helps detect smaller/farther tags.
+        _set_if_hasattr(aruco_params, "aprilTagQuadDecimate", float(self.quad_decimate))
+        _set_if_hasattr(aruco_params, "aprilTagQuadSigma", float(self.quad_sigma))
+        _set_if_hasattr(
+            aruco_params, "minMarkerPerimeterRate", float(self.min_marker_perimeter_rate)
+        )
         aruco_detector = cv2.aruco.ArucoDetector(aruco_dict, aruco_params)
 
         gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
         corners, ids, _ = aruco_detector.detectMarkers(gray)
+        used_scale = 1.0
+        if (ids is None or len(ids) == 0) and self.multi_scale_factors:
+            for scale in self.multi_scale_factors:
+                if scale <= 1.0:
+                    continue
+                resized = cv2.resize(
+                    gray,
+                    dsize=None,
+                    fx=float(scale),
+                    fy=float(scale),
+                    interpolation=cv2.INTER_CUBIC,
+                )
+                corners_scaled, ids_scaled, _ = aruco_detector.detectMarkers(resized)
+                if ids_scaled is None or len(ids_scaled) == 0:
+                    continue
+                corners = [c / float(scale) for c in corners_scaled]
+                ids = ids_scaled
+                used_scale = float(scale)
+                break
 
         if ids is None or len(ids) == 0:
             self.warn("No tags detected.")
             return
+        if used_scale != 1.0:
+            self.info(f"Detected tags via upscaled image fallback (scale={used_scale:.2f}).")
 
         for tag_corners, tag_id in zip(corners, ids.flatten()):
             rvec, tvec = _estimate_tag_pose(
