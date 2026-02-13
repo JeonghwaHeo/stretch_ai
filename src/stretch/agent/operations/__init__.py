@@ -36,5 +36,6 @@ from .update import UpdateOperation
 from .utility_operations import SetCurrentObjectOperation, SetCurrentReceptacleOperation
 from .tag_detection import DetectAprilTagsOperation, ScanForTagsOperation
 from .navigate_to_tag import NavigateToTagOperation
+from .scan_tags import ScanTagsOperation
 from .tag_grasp import TagServoGraspOperation
 from .tag_place import TagServoPlaceOperation

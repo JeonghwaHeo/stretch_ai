@@ -42,8 +42,7 @@ def _parse_tag_ids(tag_ids: str):
     help="Enable real-time updates so that the robot will dynamically update its map",
 )
 @click.option("--tag_family", default="apriltag_36h11", help="AprilTag family to use")
-@click.option("--tag_size_m", type=float, default=0.04, help="Tag size in meters")
-@click.option("--block_height_m", type=float, default=0.05, help="Block height in meters")
+@click.option("--tag_size_m", type=float, default=0.0577, help="Tag size in meters")
 @click.option("--base_tag_id", type=int, required=True, help="Tag ID to use as base block")
 @click.option(
     "--stack_tag_ids",
@@ -64,8 +63,7 @@ def main(
     reset: bool = False,
     realtime: bool = False,
     tag_family: str = "apriltag_36h11",
-    tag_size_m: float = 0.04,
-    block_height_m: float = 0.05,
+    tag_size_m: float = 0.0577,
     base_tag_id: int = 0,
     stack_tag_ids: str = "",
     max_blocks: int = None,
@@ -95,7 +93,6 @@ def main(
         stack_tag_ids=tag_id_list,
         tag_family=tag_family,
         tag_size_m=tag_size_m,
-        block_height_m=block_height_m,
         max_blocks=max_blocks,
         use_update_scan=use_update_scan,
     )
