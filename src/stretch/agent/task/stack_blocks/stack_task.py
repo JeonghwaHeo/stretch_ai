@@ -137,6 +137,7 @@ class StackBlocksTask:
             place = TagServoPlaceOperation("tag_place", self.agent)
             if not place(
                 stack_top_tag_id=self.agent.stack_top_tag_id,
+                stack_tag_id=tag_id,
                 tag_family=self.tag_family,
                 tag_size_m=self.tag_size_m,
                 refresh_tag_ids=refresh_tag_ids,

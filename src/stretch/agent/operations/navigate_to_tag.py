@@ -22,7 +22,7 @@ class NavigateToTagOperation(ManagedOperation):
         tag_id: int,
         xy_margin: float = 0.30,
         rotation_offset: float = 0.0,
-        radius_m: float = 0.7,
+        radius_m: float = 0.45,
         face_target: bool = True,
         prefer_closest_goal: bool = True,
         goal_sample_count: int = 500,

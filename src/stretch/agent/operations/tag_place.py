@@ -27,23 +27,25 @@ class TagServoPlaceOperation(ManagedOperation):
     def configure(
         self,
         stack_top_tag_id: int,
+        stack_tag_id: int,
         tag_family: str = "apriltag_36h11",
         tag_size_m: float = 0.04,
         gripper_open_value: float = 0.8,
-        place_offset: float = 0.97,
-        offset_toward_robot: float = 0.46,
+        place_offset: float = 0.69,
+        offset_toward_robot: float = 0.245,
         refresh_tag_ids: Optional[List[int]] = None,
         refresh_before_place_detect: bool = True,
         refresh_scan_tries: int = 6,
         pre_place_head_servo_enable: bool = True,
-        pre_place_head_servo_target_camera_x: float = 0.0,
-        pre_place_head_servo_tol_camera_x: float = 0.01,
+        pre_place_head_servo_target_camera_x: float = 0.003,
+        pre_place_head_servo_tol_camera_x: float = 0.001,
         pre_place_head_servo_max_steps: int = 30,
-        pre_place_head_servo_max_misses: int = 8,
-        pre_place_head_servo_gain_camera_x_to_base_x: float = 0.6,
-        pre_place_head_servo_step_limit_base_x_m: float = 0.02,
+        pre_place_head_servo_max_misses: int = 10,
+        pre_place_head_servo_gain_camera_x_to_base_x: float = 0.35,
+        pre_place_head_servo_step_limit_base_x_m: float = 0.01,
     ):
         self.stack_top_tag_id = stack_top_tag_id
+        self.stack_tag_id = stack_tag_id
         self.tag_family = tag_family
         self.tag_size_m = tag_size_m
         self.gripper_open_value = float(gripper_open_value)
@@ -123,6 +125,8 @@ class TagServoPlaceOperation(ManagedOperation):
             )
             self.robot.arm_to(joint_state, head=constants.look_at_ee, blocking=True)
 
+            time.sleep(0.3)
+
         self.warn("Pre-place head servo did not converge within max steps.")
         return False
 
@@ -139,12 +143,9 @@ class TagServoPlaceOperation(ManagedOperation):
             self.agent.tag_map = {}
         if not hasattr(self.agent, "tag_history"):
             self.agent.tag_history = []
-        self._latest_stack_top_tag_cam_pose = None
 
         updated_obs_by_id: Dict[int, object] = {}
         xyz_samples_by_id: Dict[int, List[np.ndarray]] = {}
-        cam_xyz_samples_top: List[np.ndarray] = []
-        cam_pose_top_last: Optional[np.ndarray] = None
         for scan_try in range(tries):
             obs = self.robot.get_observation()
             if obs is not None and getattr(obs, "rgb", None) is not None:
@@ -172,9 +173,6 @@ class TagServoPlaceOperation(ManagedOperation):
                     continue
                 updated_obs_by_id[obs.tag_id] = obs
                 xyz_samples_by_id.setdefault(obs.tag_id, []).append(obs.pose_world[:3, 3].copy())
-                if obs.tag_id == self.stack_top_tag_id and obs.pose_camera is not None:
-                    cam_xyz_samples_top.append(obs.pose_camera[:3, 3].copy())
-                    cam_pose_top_last = obs.pose_camera
                 matched_in_try += 1
             self.info(
                 f"Head refresh try {scan_try + 1}/{tries}: detected={len(detections)} matched={matched_in_try}"
@@ -197,20 +195,111 @@ class TagServoPlaceOperation(ManagedOperation):
                 f"(avg from {len(xyz_samples)} detections)"
             )
 
-        if cam_pose_top_last is not None and len(cam_xyz_samples_top) > 0:
-            mean_cam_xyz = np.mean(np.stack(cam_xyz_samples_top, axis=0), axis=0)
-            cam_pose_avg = cam_pose_top_last.copy()
-            cam_pose_avg[:3, 3] = mean_cam_xyz
-            self._latest_stack_top_tag_cam_pose = cam_pose_avg
-            self.info(
-                f"Updated stack-top camera pose from {len(cam_xyz_samples_top)} detections: "
-                f"cam=[{mean_cam_xyz[0]:.3f}, {mean_cam_xyz[1]:.3f}, {mean_cam_xyz[2]:.3f}]"
-            )
-
         self.info(
             f"Head refresh summary: updated {len(updated_obs_by_id)}/{len(refresh_tag_ids)} target tags"
         )
         return updated_obs_by_id
+
+    def _estimate_refined_stack_top_cam_pose_from_depth(
+        self, tries: int = 6, patch_radius: int = 3
+    ) -> Optional[np.ndarray]:
+        valid_xyz_samples: List[np.ndarray] = []
+        last_pose_camera: Optional[np.ndarray] = None
+
+        for scan_try in range(max(1, int(tries))):
+            detector = DetectAprilTagsOperation(
+                f"detect_apriltag_for_place_depth_refine_{scan_try}",
+                agent=self.agent,
+            )
+            detector(
+                tag_family=self.tag_family,
+                tag_size_m=self.tag_size_m,
+                camera="head",
+                store_in_agent=False,
+            )
+            target_obs = None
+            for det_obs in detector.get_observations():
+                if det_obs.tag_id == self.stack_top_tag_id:
+                    target_obs = det_obs
+                    break
+
+            if target_obs is None:
+                self.info(
+                    f"Depth refine try {scan_try + 1}/{tries}: stack top tag {self.stack_top_tag_id} not detected."
+                )
+                continue
+
+            obs = self.robot.get_observation()
+            if (
+                obs is None
+                or getattr(obs, "depth", None) is None
+                or getattr(obs, "camera_K", None) is None
+            ):
+                self.info(f"Depth refine try {scan_try + 1}/{tries}: missing depth or camera_K.")
+                continue
+
+            depth = obs.depth
+            camera_k = obs.camera_K
+            if depth.ndim != 2:
+                self.info(f"Depth refine try {scan_try + 1}/{tries}: invalid depth shape.")
+                continue
+
+            u_f, v_f = target_obs.center_px
+            u_c = int(round(u_f))
+            v_c = int(round(v_f))
+            h, w = depth.shape
+            depth_vals: List[float] = []
+            for dv in range(-patch_radius, patch_radius + 1):
+                for du in range(-patch_radius, patch_radius + 1):
+                    uu = u_c + du
+                    vv = v_c + dv
+                    if uu < 0 or uu >= w or vv < 0 or vv >= h:
+                        continue
+                    d = float(depth[vv, uu])
+                    if np.isfinite(d) and d > 0.0:
+                        depth_vals.append(d)
+
+            if len(depth_vals) == 0:
+                self.info(
+                    f"Depth refine try {scan_try + 1}/{tries}: no valid depth in {(2 * patch_radius + 1)}x{(2 * patch_radius + 1)} patch."
+                )
+                continue
+
+            fx = float(camera_k[0, 0])
+            fy = float(camera_k[1, 1])
+            cx = float(camera_k[0, 2])
+            cy = float(camera_k[1, 2])
+            if abs(fx) < 1e-9 or abs(fy) < 1e-9:
+                self.info(f"Depth refine try {scan_try + 1}/{tries}: invalid camera intrinsics.")
+                continue
+
+            z = float(np.mean(depth_vals))
+            x = (float(u_f) - cx) * z / fx
+            y = (float(v_f) - cy) * z / fy
+            valid_xyz_samples.append(np.array([x, y, z], dtype=np.float32))
+            last_pose_camera = target_obs.pose_camera
+            self.info(
+                f"Depth refine try {scan_try + 1}/{tries}: valid_depth={len(depth_vals)} "
+                f"cam=[{x:.3f}, {y:.3f}, {z:.3f}]"
+            )
+
+        if len(valid_xyz_samples) == 0:
+            self.error(
+                f"Failed depth refinement for stack top tag {self.stack_top_tag_id}: "
+                f"0 valid tries out of {tries}."
+            )
+            return None
+
+        mean_xyz = np.mean(np.stack(valid_xyz_samples, axis=0), axis=0)
+        pose_camera = np.eye(4, dtype=np.float32)
+        if last_pose_camera is not None:
+            pose_camera = last_pose_camera.copy()
+        pose_camera[:3, 3] = mean_xyz
+        self.info(
+            f"Depth refine summary: valid={len(valid_xyz_samples)}/{tries} "
+            f"mean_cam=[{mean_xyz[0]:.3f}, {mean_xyz[1]:.3f}, {mean_xyz[2]:.3f}]"
+        )
+        return pose_camera
 
     def run(self) -> None:
         self.intro(f"Placing on tag {self.stack_top_tag_id}.")
@@ -238,9 +327,10 @@ class TagServoPlaceOperation(ManagedOperation):
                 refresh_ids = {self.stack_top_tag_id}
             self._refresh_tag_map_with_head_scan(refresh_ids, self.refresh_scan_tries)
 
-        tag_cam_pose = getattr(self, "_latest_stack_top_tag_cam_pose", None)
+        tag_cam_pose = self._estimate_refined_stack_top_cam_pose_from_depth(
+            tries=self.refresh_scan_tries, patch_radius=1
+        )
         if tag_cam_pose is None:
-            self.error("Failed to get averaged stack top tag camera pose after refresh.")
             return
 
         cam_x, cam_y, cam_z = [float(v) for v in tag_cam_pose[:3, 3]]
@@ -278,6 +368,15 @@ class TagServoPlaceOperation(ManagedOperation):
         retracted = self.robot.get_joint_positions().copy()
         retracted[HelloStretchIdx.ARM] = 0.0
         self.robot.arm_to(retracted, head=constants.look_at_ee, blocking=True)
+
+        # Refresh the placed block tag pose after retract.
+        refreshed = self._refresh_tag_map_with_head_scan({self.stack_tag_id}, self.refresh_scan_tries)
+        if self.stack_tag_id not in refreshed:
+            self.error(
+                f"Failed to refresh placed tag {self.stack_tag_id} "
+                f"within {self.refresh_scan_tries} tries."
+            )
+            return
 
         self._success = True
 

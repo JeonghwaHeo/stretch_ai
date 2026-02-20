@@ -43,7 +43,7 @@ class TagServoGraspOperation(ManagedOperation):
         tag_servo_gain_xyz: tuple = (0.5, 0.5, 0.5),
         tag_servo_step_limits: tuple = (0.03, 0.03, 0.02),
         gripper_open_value: float = 0.8,
-        gripper_close_value: float = 0.1,
+        gripper_close_value: float = 0.2,
         refresh_tag_ids: Optional[List[int]] = None,
         refresh_before_pre_detect: bool = True,
         refresh_scan_tries: int = 6,
