@@ -31,6 +31,7 @@ class StackBlocksTask:
         tag_size_m: float = 0.04,
         max_blocks: Optional[int] = None,
         use_update_scan: bool = False,
+        manipulation_radius: float = 0.60,
     ):
         self.agent = agent
         self.base_tag_id = base_tag_id
@@ -39,6 +40,7 @@ class StackBlocksTask:
         self.tag_size_m = tag_size_m
         self.max_blocks = max_blocks
         self.use_update_scan = use_update_scan
+        self.manipulation_radius = manipulation_radius
 
     def _get_pose_world(self, tag_id: int):
         if not hasattr(self.agent, "tag_map"):
@@ -108,7 +110,7 @@ class StackBlocksTask:
             if not nav_to_block(
                 tag_id=tag_id,
                 rotation_offset=np.pi / 2,
-                radius_m=self.agent.manipulation_radius,
+                radius_m=self.manipulation_radius,
                 face_target=False,
             ):
                 return False
@@ -129,7 +131,7 @@ class StackBlocksTask:
             if not nav_to_stack(
                 tag_id=self.agent.stack_top_tag_id,
                 rotation_offset=np.pi / 2,
-                radius_m=self.agent.manipulation_radius,
+                radius_m=self.manipulation_radius,
                 face_target=False,
             ):
                 return False

@@ -20,13 +20,16 @@ class NavigateToTagOperation(ManagedOperation):
     def configure(
         self,
         tag_id: int,
-        xy_margin: float = 0.30,
+        xy_margin: float = 0.25,
         rotation_offset: float = 0.0,
-        radius_m: float = 0.45,
+        radius_m: float = 0.66,
         face_target: bool = True,
         prefer_closest_goal: bool = True,
         goal_sample_count: int = 500,
         max_plan_tries: int = 50,
+        fallback_non_conservative: bool = True,
+        fallback_goal_sample_count: Optional[int] = None,
+        fallback_max_plan_tries: Optional[int] = None,
     ):
         self.tag_id = tag_id
         self.xy_margin = xy_margin
@@ -36,6 +39,9 @@ class NavigateToTagOperation(ManagedOperation):
         self.prefer_closest_goal = prefer_closest_goal
         self.goal_sample_count = goal_sample_count
         self.max_plan_tries = max_plan_tries
+        self.fallback_non_conservative = bool(fallback_non_conservative)
+        self.fallback_goal_sample_count = fallback_goal_sample_count
+        self.fallback_max_plan_tries = fallback_max_plan_tries
 
     def can_start(self) -> bool:
         if not hasattr(self.agent, "tag_map"):
@@ -60,22 +66,34 @@ class NavigateToTagOperation(ManagedOperation):
         bounds[2] = [center[2], center[2]]
         return bounds
 
-    def _plan_to_bounds_prefer_closest(self, bounds: np.ndarray, start: np.ndarray):
+    def _plan_to_bounds_prefer_closest(
+        self,
+        bounds: np.ndarray,
+        start: np.ndarray,
+        conservative: bool = True,
+        goal_sample_count: Optional[int] = None,
+        max_plan_tries: Optional[int] = None,
+    ):
         voxel_map = self.agent.get_voxel_map()
         if voxel_map is None:
             return None
+
+        goal_sample_count = (
+            self.goal_sample_count if goal_sample_count is None else int(goal_sample_count)
+        )
+        max_plan_tries = self.max_plan_tries if max_plan_tries is None else int(max_plan_tries)
 
         mask = voxel_map.mask_from_bounds(bounds)
         goals = []
         for goal in self.navigation_space.sample_near_mask(
             mask,
             radius_m=self.radius_m,
-            conservative=True,
+            conservative=conservative,
             rotation_offset=self.rotation_offset,
         ):
             goal_np = goal.cpu().numpy()
             goals.append(goal_np)
-            if len(goals) >= self.goal_sample_count:
+            if len(goals) >= goal_sample_count:
                 break
 
         if len(goals) == 0:
@@ -85,7 +103,7 @@ class NavigateToTagOperation(ManagedOperation):
 
         tries = 0
         for goal in goals:
-            if tries >= self.max_plan_tries:
+            if tries >= max_plan_tries:
                 break
             tries += 1
             if not self.navigation_space.is_valid(goal, verbose=False):
@@ -104,7 +122,7 @@ class NavigateToTagOperation(ManagedOperation):
         start = self.robot.get_base_pose()
         res = None
         if self.prefer_closest_goal:
-            res = self._plan_to_bounds_prefer_closest(bounds, start)
+            res = self._plan_to_bounds_prefer_closest(bounds, start, conservative=True)
         if res is None:
             res = self.agent.plan_to_bounds(
                 bounds,
@@ -113,7 +131,32 @@ class NavigateToTagOperation(ManagedOperation):
                 radius_m=self.radius_m,
                 rotation_offset=self.rotation_offset,
             )
-        if not res.success:
+
+        # Retry once with less conservative goal sampling if primary planning failed.
+        if (res is None or not res.success) and self.fallback_non_conservative:
+            self.warn("Primary plan failed (conservative=True). Retrying with conservative=False.")
+            if self.prefer_closest_goal:
+                res = self._plan_to_bounds_prefer_closest(
+                    bounds,
+                    start,
+                    conservative=False,
+                    goal_sample_count=self.fallback_goal_sample_count,
+                    max_plan_tries=self.fallback_max_plan_tries,
+                )
+            if res is None:
+                res = self.agent.plan_to_bounds(
+                    bounds,
+                    start,
+                    verbose=False,
+                    radius_m=self.radius_m,
+                    rotation_offset=self.rotation_offset,
+                )
+            if res is not None and res.success:
+                self.info("Fallback planning succeeded with conservative=False.")
+            else:
+                self.warn("Fallback planning failed.")
+
+        if res is None or not res.success:
             self.error("Failed to plan to tag bounds.")
             self._success = False
             return

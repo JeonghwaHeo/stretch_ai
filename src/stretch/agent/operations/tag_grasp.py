@@ -32,7 +32,7 @@ class TagServoGraspOperation(ManagedOperation):
         grasp_height_offset: float = 0.01,
         lift_distance: float = 0.20,
         approach_offset: float = 0.08,
-        pre_detect_offset_z: float = 0.30,
+        pre_detect_offset_z: float = 0.42,
         pre_detect_offset_toward_robot: float = 0.53,
         pre_detect_pitch_deg: float = 45.0,
         use_tag_servo: bool = True,

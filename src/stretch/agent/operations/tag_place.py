@@ -31,13 +31,13 @@ class TagServoPlaceOperation(ManagedOperation):
         tag_family: str = "apriltag_36h11",
         tag_size_m: float = 0.04,
         gripper_open_value: float = 0.8,
-        place_offset: float = 0.69,
-        offset_toward_robot: float = 0.245,
+        place_offset: float = 0.697,
+        offset_toward_robot: float = 0.24,
         refresh_tag_ids: Optional[List[int]] = None,
         refresh_before_place_detect: bool = True,
         refresh_scan_tries: int = 6,
         pre_place_head_servo_enable: bool = True,
-        pre_place_head_servo_target_camera_x: float = 0.003,
+        pre_place_head_servo_target_camera_x: float = -0.005,
         pre_place_head_servo_tol_camera_x: float = 0.001,
         pre_place_head_servo_max_steps: int = 30,
         pre_place_head_servo_max_misses: int = 10,
@@ -125,7 +125,7 @@ class TagServoPlaceOperation(ManagedOperation):
             )
             self.robot.arm_to(joint_state, head=constants.look_at_ee, blocking=True)
 
-            time.sleep(0.3)
+            time.sleep(0.1)
 
         self.warn("Pre-place head servo did not converge within max steps.")
         return False
