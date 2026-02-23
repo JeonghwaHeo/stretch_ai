@@ -31,7 +31,7 @@ class ScanTagsOperation(ManagedOperation):
         tag_size_m: float = 0.04,
         use_update_scan: bool = False,
         steps: int = 8,
-        scan_tries_per_step: int = 6,
+        scan_tries_per_step: int = 8,
         scan_head_tilt_deg: float = -45.0,
         save_debug_images: bool = True,
     ):

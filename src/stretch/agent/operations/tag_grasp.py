@@ -39,7 +39,7 @@ class TagServoGraspOperation(ManagedOperation):
         tag_target_cam_xyz: tuple = (0.0, 0.02, 0.22),
         tag_tol_cam_xyz: tuple = (0.005, 0.005, 0.005),
         tag_servo_max_steps: int = 80,
-        tag_servo_max_misses: int = 10,
+        tag_servo_max_misses: int = 20,
         tag_servo_gain_xyz: tuple = (0.5, 0.5, 0.5),
         tag_servo_step_limits: tuple = (0.03, 0.03, 0.02),
         gripper_open_value: float = 0.8,
@@ -190,11 +190,12 @@ class TagServoGraspOperation(ManagedOperation):
                     timeout=20.0,
                 )
 
-        # Move to manipulation mode
-        self.robot.move_to_manip_posture()
+        # Rotate head to look toward manipulation side without moving full manip posture.
+        _, head_tilt = self.robot.get_pan_tilt()
+        self.robot.head_to(-np.pi / 2.0, head_tilt, blocking=True)
 
         # Wait for motion to complete
-        time.sleep(3.0)
+        time.sleep(1.0)
 
         # Refresh tag map with head camera before pre-detect positioning.
         if self.refresh_before_pre_detect:
@@ -208,13 +209,12 @@ class TagServoGraspOperation(ManagedOperation):
         if hasattr(self.agent, "tag_map") and self.tag_id in self.agent.tag_map:
             tag_pose_world = self.agent.tag_map[self.tag_id].pose_world
 
-        # Switch to manipulation mode
-        self.robot.switch_to_manipulation_mode()
-
         # Open gripper
         # HomeRobotZmqClient.open_gripper() uses a preset and does not accept a target value.
         # For a custom "open" value, use gripper_to().
         self.robot.gripper_to(self.gripper_open_value, blocking=True)
+
+        self.robot.switch_to_manipulation_mode()
 
         if tag_pose_world is not None:
             # Compute a pre-detection pose: 10cm above tag and 10cm toward the robot.
