@@ -1,4 +1,4 @@
-# Stretch AI for Block Stacking
+# Block Stacking with Stretch 3
 
 This repository contains additional apps, tasks, operations for Block Stacking task using [Stretch 3](https://hello-robot.com/stretch-3-product) mobile manipulator, forked from [hello_robot/stretch_ai](https://github.com/hello-robot/stretch_ai).
 
