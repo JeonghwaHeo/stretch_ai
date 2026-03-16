@@ -1,3 +1,75 @@
+# Stretch AI for Block Stacking
+
+This repository contains additional apps, tasks, operations for Block Stacking task using [Stretch 3](https://hello-robot.com/stretch-3-product) mobile manipulator, forked from [hello_robot/stretch_ai](https://github.com/hello-robot/stretch_ai).
+
+The `stack_blocks` app of this repository is capable of stacking up to six cube blocks using Stretch 3 mobile manipulator.
+
+<img width="285" height="347" alt="Image" src="https://github.com/user-attachments/assets/908efac9-6ead-46c4-aff2-59625792ac65" />
+
+Each of the cube blocks must attach an apriltag on top. For the apriltag family, `apriltag_16h5` is recommended for long range detection.
+
+When activated, Stretch 3 will perform a short mapping operation to map its surroundings and refresh the tag map for scattered blocks.
+
+After the mapping operation, Stretch 3 will conduct a repeative **navigation - grasping - navigation - placing** operations to stack cube blocks in the desired order.
+
+![Image](https://github.com/user-attachments/assets/29c4ea09-bcde-418e-9ca2-131e1ca69d51)
+
+## Conda environment setting
+
+The `stack_blocks` app from this repository doesn't require additional GPU server as it runs in local Stretch 3 robot.
+
+After cloning this repository, create conda environment for local cpu version of `stretch_ai`:
+
+```bash
+cd stretch_ai
+./install.sh --conda --cpu
+```
+
+This command will create a conda environment named `stretch_ai_cpu_x.x.x` based on the version of `stretch_ai`.
+
+## Run stretch_ai_ros2_bridge
+
+At the **first local stretch 3 terminal**, after making sure that conda environment is deactivated, home stretch 3 and run `stretch_ai_ros2_bridge`:
+
+```bash
+conda deactivate
+stretch_robot_home.py
+```
+```bash
+cd stretch_ai
+./scripts/run_stretch_ai_ros2_bridge_server.sh
+```
+
+## Run stack_blocks app
+
+At the **second local stretch 3 terminal**, activate the conda environment previously created, and run `stack_blocks` app:
+
+```bash
+conda activate stretch_ai_cpu_0.3.3
+```
+```bash
+python -m stretch.app.stack_blocks \
+  --local \
+  --tag_family "apriltag_16h5" \
+  --base_tag_id 0 \
+  --tag_size_m 0.0577 \
+  --stack_tag_ids 1,2,3,4,5
+```
+
+You can set the apriltag family and its size by changing `--tag_family`, `--tag_size_m` argument. `--tag_size_m` is the meter scale of the apriltag.
+
+`--base_tag_id` is the tag number of the base tag, `--stack_tag_ids` are the sequence of tag numbers of the blocks that will be stacked on the base tag block.
+
+If the `python -m` command doesn't work, try:
+
+```bash
+cd stretch_ai
+python -m pip install -e ./src[dev] --no-cache-dir
+python -m pip uninstall av -y
+```
+
+The contents below are the original README from [hello_robot/stretch_ai](https://github.com/hello-robot/stretch_ai).
+
 # Stretch AI
 
 [![Python 3.10](https://img.shields.io/badge/python-3.10-blue.svg)](https://www.python.org/downloads/release/python-3100/)
