@@ -12,7 +12,7 @@ When activated, Stretch 3 will perform a short mapping operation to map its surr
 
 After the mapping operation, Stretch 3 will conduct a repeative **navigation - grasping - navigation - placing** operations to stack cube blocks in the desired order.
 
-![Image](https://github.com/user-attachments/assets/29c4ea09-bcde-418e-9ca2-131e1ca69d51)
+![Image](https://github.com/user-attachments/assets/a5aa98f5-c16b-4f90-b62c-9581e4e52c0b)
 
 ## Conda environment setting
 
